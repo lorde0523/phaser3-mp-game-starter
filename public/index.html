@@ -162,12 +162,20 @@
       socket.on('playerMoved', (playerInfo) => {
         if (otherPlayers[playerInfo.id]) {
           otherPlayers[playerInfo.id].setPosition(playerInfo.x, playerInfo.y);
+          // Update HP text position for other players
+          if (otherPlayers[playerInfo.id].hpText) {
+            otherPlayers[playerInfo.id].hpText.setPosition(playerInfo.x, playerInfo.y - 25);
+          }
         }
       });
 
       // Handle player disconnect
       socket.on('playerDisconnected', (playerId) => {
         if (otherPlayers[playerId]) {
+          // Destroy HP text along with the player sprite
+          if (otherPlayers[playerId].hpText) {
+            otherPlayers[playerId].hpText.destroy();
+          }
           otherPlayers[playerId].destroy();
           delete otherPlayers[playerId];
         }
@@ -197,6 +205,11 @@
       }
 
       if (moved) {
+        // Update HP text position to follow player
+        if (currentPlayer.hpText) {
+          currentPlayer.hpText.setPosition(currentPlayer.x, currentPlayer.y - 25);
+        }
+
         socket.emit('playerMovement', {
           x: currentPlayer.x,
           y: currentPlayer.y
