@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phaser 3 Multiplayer Game</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #222;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    #login-container {
+      text-align: center;
+      padding: 20px;
+      background-color: #333;
+      border-radius: 8px;
+    }
+    #login-container h1 {
+      margin-bottom: 20px;
+    }
+    #login-container input {
+      display: block;
+      width: 200px;
+      margin: 10px auto;
+      padding: 10px;
+      border: none;
+      border-radius: 4px;
+    }
+    #login-container button {
+      padding: 10px 20px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 10px;
+    }
+    #login-container button:hover {
+      background-color: #45a049;
+    }
+    #message {
+      margin-top: 10px;
+      color: #f44;
+    }
+    #game-container {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="login-container">
+    <h1>Multiplayer Game</h1>
+    <form id="login-form">
+      <input type="text" id="username" placeholder="Username" required>
+      <input type="password" id="password" placeholder="Password" required>
+      <button type="submit">Login / Register</button>
+    </form>
+    <p id="message"></p>
+  </div>
+  <div id="game-container"></div>
+
+  <script>
+    let socket;
+    let currentPlayer;
+    let otherPlayers = {};
+    let cursors;
+
+    // Login form handling
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+
+      try {
+        const response = await fetch('/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const data = await response.json();
+        document.getElementById('message').textContent = data.message;
+
+        if (data.success) {
+          document.getElementById('login-container').style.display = 'none';
+          document.getElementById('game-container').style.display = 'block';
+          startGame();
+        }
+      } catch (err) {
+        document.getElementById('message').textContent = 'Connection error';
+      }
+    });
+
+    function startGame() {
+      // Connect to Socket.io
+      socket = io();
+
+      const config = {
+        type: Phaser.AUTO,
+        width: 800,
+        height: 600,
+        parent: 'game-container',
+        scene: {
+          preload: preload,
+          create: create,
+          update: update
+        }
+      };
+
+      new Phaser.Game(config);
+    }
+
+    function preload() {
+      // Create simple colored rectangles as player sprites
+      const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+      
+      // Current player (green)
+      graphics.fillStyle(0x00ff00, 1);
+      graphics.fillRect(0, 0, 32, 32);
+      graphics.generateTexture('player', 32, 32);
+      graphics.clear();
+
+      // Other players (blue)
+      graphics.fillStyle(0x0088ff, 1);
+      graphics.fillRect(0, 0, 32, 32);
+      graphics.generateTexture('otherPlayer', 32, 32);
+    }
+
+    function create() {
+      const self = this;
+      cursors = this.input.keyboard.createCursorKeys();
+
+      // Handle current players
+      socket.on('currentPlayers', (players) => {
+        Object.keys(players).forEach((id) => {
+          if (id === socket.id) {
+            addPlayer(self, players[id], true);
+          } else {
+            addOtherPlayer(self, players[id]);
+          }
+        });
+      });
+
+      // Handle new player joining
+      socket.on('newPlayer', (playerInfo) => {
+        addOtherPlayer(self, playerInfo);
+      });
+
+      // Handle player movement
+      socket.on('playerMoved', (playerInfo) => {
+        if (otherPlayers[playerInfo.id]) {
+          otherPlayers[playerInfo.id].setPosition(playerInfo.x, playerInfo.y);
+        }
+      });
+
+      // Handle player disconnect
+      socket.on('playerDisconnected', (playerId) => {
+        if (otherPlayers[playerId]) {
+          otherPlayers[playerId].destroy();
+          delete otherPlayers[playerId];
+        }
+      });
+    }
+
+    function update() {
+      if (!currentPlayer) return;
+
+      let moved = false;
+      const speed = 4;
+
+      if (cursors.left.isDown) {
+        currentPlayer.x -= speed;
+        moved = true;
+      } else if (cursors.right.isDown) {
+        currentPlayer.x += speed;
+        moved = true;
+      }
+
+      if (cursors.up.isDown) {
+        currentPlayer.y -= speed;
+        moved = true;
+      } else if (cursors.down.isDown) {
+        currentPlayer.y += speed;
+        moved = true;
+      }
+
+      if (moved) {
+        socket.emit('playerMovement', {
+          x: currentPlayer.x,
+          y: currentPlayer.y
+        });
+      }
+    }
+
+    function addPlayer(scene, playerInfo, isCurrentPlayer) {
+      const sprite = scene.add.sprite(playerInfo.x, playerInfo.y, 'player');
+      
+      // Add HP text
+      const hpText = scene.add.text(playerInfo.x, playerInfo.y - 25, `HP: ${playerInfo.hp}`, {
+        fontSize: '12px',
+        fill: '#fff'
+      }).setOrigin(0.5);
+      
+      sprite.hpText = hpText;
+      currentPlayer = sprite;
+    }
+
+    function addOtherPlayer(scene, playerInfo) {
+      const sprite = scene.add.sprite(playerInfo.x, playerInfo.y, 'otherPlayer');
+      
+      // Add HP text
+      const hpText = scene.add.text(playerInfo.x, playerInfo.y - 25, `HP: ${playerInfo.hp}`, {
+        fontSize: '12px',
+        fill: '#fff'
+      }).setOrigin(0.5);
+      
+      sprite.hpText = hpText;
+      sprite.playerId = playerInfo.id;
+      otherPlayers[playerInfo.id] = sprite;
+    }
+  </script>
+</body>
+</html>

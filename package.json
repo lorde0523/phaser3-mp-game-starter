@@ -1,0 +1,23 @@
+{
+  "name": "phaser3-mp-game-starter",
+  "version": "1.0.0",
+  "description": "Minimal starter for a 2D multiplayer web game with Phaser 3, Node.js, Express, Socket.io, and SQLite",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "phaser3",
+    "multiplayer",
+    "socket.io",
+    "express",
+    "sqlite"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.0",
+    "socket.io": "^4.7.5",
+    "better-sqlite3": "^11.3.0"
+  }
+}
