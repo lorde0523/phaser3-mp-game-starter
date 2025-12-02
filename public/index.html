@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Phaser Multiplayer Starter</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        min-height: 100vh;
+      }
+      #sidebar {
+        padding: 16px;
+        background: #111827;
+        border-right: 1px solid #1f2937;
+        box-shadow: 2px 0 6px rgba(0, 0, 0, 0.3);
+      }
+      #game-container {
+        position: relative;
+      }
+      form {
+        margin-bottom: 12px;
+        background: #1f2937;
+        padding: 12px;
+        border-radius: 8px;
+        border: 1px solid #334155;
+      }
+      input,
+      button {
+        width: 100%;
+        padding: 8px;
+        margin-top: 6px;
+        border-radius: 6px;
+        border: 1px solid #475569;
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+      button {
+        cursor: pointer;
+        background: #2563eb;
+        border: none;
+      }
+      #profile {
+        background: #1f2937;
+        border: 1px solid #334155;
+        padding: 12px;
+        border-radius: 8px;
+      }
+      #messages {
+        color: #fbbf24;
+        min-height: 24px;
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3/dist/phaser.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+  </head>
+  <body>
+    <div id="sidebar">
+      <h2>Account</h2>
+      <div id="messages"></div>
+      <form id="register-form">
+        <h3>Register</h3>
+        <input id="reg-username" placeholder="Username" required />
+        <input id="reg-password" type="password" placeholder="Password" required />
+        <input id="reg-display" placeholder="Display name" />
+        <button type="submit">Register</button>
+      </form>
+
+      <form id="login-form">
+        <h3>Login</h3>
+        <input id="login-username" placeholder="Username" required />
+        <input id="login-password" type="password" placeholder="Password" required />
+        <button type="submit">Login</button>
+      </form>
+
+      <button id="logout-btn">Logout</button>
+
+      <div id="profile">
+        <h3>Profile</h3>
+        <div><strong>User:</strong> <span id="profile-username">-</span></div>
+        <div><strong>Display:</strong> <span id="profile-display">-</span></div>
+        <div><strong>HP:</strong> <span id="profile-hp">-</span></div>
+        <div><strong>Last Login:</strong> <span id="profile-login">-</span></div>
+      </div>
+    </div>
+
+    <div id="game-container"></div>
+
+    <script>
+      const messageBox = document.getElementById('messages');
+      const profileUsername = document.getElementById('profile-username');
+      const profileDisplay = document.getElementById('profile-display');
+      const profileHp = document.getElementById('profile-hp');
+      const profileLogin = document.getElementById('profile-login');
+      let gameEndReported = false;
+
+      const socket = io({ autoConnect: false });
+
+      function showMessage(text) {
+        messageBox.textContent = text;
+      }
+
+      async function register(event) {
+        event.preventDefault();
+        const payload = {
+          username: document.getElementById('reg-username').value,
+          password: document.getElementById('reg-password').value,
+          displayName: document.getElementById('reg-display').value,
+        };
+        try {
+          const res = await fetch('/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            showMessage('Registered and logged in!');
+            await refreshProfile();
+            socket.connect();
+          } else {
+            showMessage(data.error || 'Registration failed');
+          }
+        } catch (error) {
+          showMessage('Registration failed');
+        }
+      }
+
+      async function login(event) {
+        event.preventDefault();
+        const payload = {
+          username: document.getElementById('login-username').value,
+          password: document.getElementById('login-password').value,
+        };
+        try {
+          const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            showMessage('Logged in!');
+            await refreshProfile();
+            socket.connect();
+          } else {
+            showMessage(data.error || 'Login failed');
+          }
+        } catch (error) {
+          showMessage('Login failed');
+        }
+      }
+
+      async function logout() {
+        await fetch('/api/logout', { method: 'POST' });
+        showMessage('Logged out');
+        socket.disconnect();
+        profileUsername.textContent = '-';
+        profileDisplay.textContent = '-';
+        profileHp.textContent = '-';
+        profileLogin.textContent = '-';
+      }
+
+      async function refreshProfile() {
+        const res = await fetch('/api/me');
+        if (!res.ok) return false;
+        const data = await res.json();
+        const user = data.user || {};
+        const profile = data.profile || {};
+        profileUsername.textContent = user.username || '-';
+        profileDisplay.textContent = profile.display_name || '-';
+        profileHp.textContent = profile.hp ?? '-';
+        profileLogin.textContent = profile.last_login || '-';
+        return Boolean(user.username);
+      }
+
+      document.getElementById('register-form').addEventListener('submit', register);
+      document.getElementById('login-form').addEventListener('submit', login);
+      document.getElementById('logout-btn').addEventListener('click', logout);
+
+      class MultiplayerScene extends Phaser.Scene {
+        constructor() {
+          super('multiplayer');
+          this.otherPlayers = new Map();
+        }
+
+        preload() {}
+
+        create() {
+          this.player = this.add.circle(200, 200, 16, 0x38bdf8);
+          this.hp = 100;
+          this.cursors = this.input.keyboard.createCursorKeys();
+
+          socket.on('connect', () => {
+            showMessage('Connected to multiplayer');
+          });
+
+          socket.on('currentPlayers', (players) => {
+            players.forEach((p) => {
+              if (p.id === socket.id) return;
+              this.addOtherPlayer(p);
+            });
+          });
+
+          socket.on('playerJoined', (player) => {
+            if (player.id === socket.id) return;
+            this.addOtherPlayer(player);
+          });
+
+          socket.on('playerStateUpdate', (state) => {
+            const other = this.otherPlayers.get(state.id);
+            if (!other) return;
+            other.circle.setPosition(state.x, state.y);
+            other.hp = state.hp;
+          });
+
+          socket.on('playerLeft', ({ id }) => {
+            const other = this.otherPlayers.get(id);
+            if (other) {
+              other.circle.destroy();
+              this.otherPlayers.delete(id);
+            }
+          });
+        }
+
+        addOtherPlayer(player) {
+          const circle = this.add.circle(player.x, player.y, 14, 0x22c55e);
+          this.otherPlayers.set(player.id, { circle, hp: player.hp });
+        }
+
+        update() {
+          if (!socket.connected) return;
+          const speed = 2.2;
+          if (this.cursors.left.isDown) this.player.x -= speed;
+          if (this.cursors.right.isDown) this.player.x += speed;
+          if (this.cursors.up.isDown) this.player.y -= speed;
+          if (this.cursors.down.isDown) this.player.y += speed;
+
+          if (this.hp > 0) {
+            this.hp -= 0.01;
+          }
+
+          socket.emit('playerState', {
+            x: this.player.x,
+            y: this.player.y,
+            hp: Math.max(0, Math.round(this.hp)),
+          });
+
+          if (this.hp <= 0 && !gameEndReported) {
+            this.handleGameEnd();
+          }
+        }
+
+        async handleGameEnd() {
+          this.hp = 0;
+          gameEndReported = true;
+          socket.emit('playerState', { x: this.player.x, y: this.player.y, hp: 0 });
+          try {
+            await fetch('/api/game-end', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ score: Math.floor(Math.random() * 1000), duration: 60, hp: 0 }),
+            });
+            showMessage('Game over! Results recorded.');
+          } catch (error) {
+            showMessage('Game over. Failed to record results.');
+          }
+        }
+      }
+
+      const config = {
+        type: Phaser.AUTO,
+        parent: 'game-container',
+        width: 800,
+        height: 600,
+        backgroundColor: '#0b1034',
+        scene: [MultiplayerScene],
+      };
+
+      const game = new Phaser.Game(config);
+
+      (async () => {
+        const hasSession = await refreshProfile();
+        if (hasSession) {
+          socket.connect();
+        }
+      })();
+    </script>
+  </body>
+</html>
