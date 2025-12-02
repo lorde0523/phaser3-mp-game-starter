@@ -3,6 +3,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const Database = require('better-sqlite3');
 const bcrypt = require('bcrypt');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 
 const app = express();
@@ -13,6 +14,15 @@ const io = new Server(server);
 const SALT_ROUNDS = 10;
 const GAME_WIDTH = 800;
 const GAME_HEIGHT = 600;
+
+// Rate limiting for login endpoint
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // Limit each IP to 10 login attempts per windowMs
+  message: { success: false, message: 'Too many login attempts, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Parse JSON bodies
 app.use(express.json());
@@ -35,8 +45,8 @@ db.exec(`
 // In-memory player state: { id, x, y, hp }
 const players = {};
 
-// Login endpoint
-app.post('/login', async (req, res) => {
+// Login endpoint with rate limiting
+app.post('/login', loginLimiter, async (req, res) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
